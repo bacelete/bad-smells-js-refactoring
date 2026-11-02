@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<title>Relatório - Bad Smells</title>
+<style>
+  @page { size: A4; margin: 1.6cm 1.8cm; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 9.5pt; line-height: 1.35; color: #111; }
+  .cover { height: 25cm; display: flex; flex-direction: column; justify-content: center; text-align: center; page-break-after: always; }
+  .cover h1 { font-size: 24pt; margin-bottom: 2cm; }
+  .cover p { font-size: 13pt; line-height: 2; }
+  h2 { font-size: 13pt; border-bottom: 1px solid #ccc; padding-bottom: 3px; margin-top: 1.2em; }
+  h3 { font-size: 12pt; margin-top: 1em; }
+  pre { background: #f5f5f5; border: 1px solid #ddd; padding: 8px; font-size: 7pt; line-height: 1.25; white-space: pre-wrap; margin: 4px 0; }
+  code { font-family: Consolas, monospace; font-size: 9pt; }
+  pre code { font-size: 6.6pt; overflow-wrap: anywhere; }
+  .cmp pre { padding: 6px; }
+  img { max-width: 88%; display: block; margin: 8px auto 2px; border: 1px solid #ccc; }
+  p:has(> img) { page-break-inside: avoid; }
+  .cmp { display: flex; gap: 10px; } .cmp > div { flex: 1; min-width: 0; } .cmp h3 { margin: 4px 0; }
+  ul, ol { margin: 4px 0; } li { margin: 1px 0; } p { margin: 5px 0; }
+  em { color: #444; }
+  hr { display: none; }
+  blockquote { border-left: 3px solid #ccc; margin-left: 0; padding-left: 10px; color: #444; }
+</style></head>
+<body>
+<div class="cover"><h1>Detecção de Bad Smells e Refatoração Segura</h1>
+<p><strong>Disciplina:</strong> Teste de Software<br />
+<strong>Trabalho:</strong> Detecção de Bad Smells e Refatoração Segura<br />
+<strong>Aluno:</strong> Arthur Henrique Teixeira — <strong>Matrícula:</strong> 859123<br />
+<strong>Repositório:</strong> <a href="https://github.com/bacelete/bad-smells-js-refactoring">https://github.com/bacelete/bad-smells-js-refactoring</a></p></div>
+<h2>1. Análise de Smells</h2>
+<p>O código original (<code>src/ReportGenerator.js</code>) concentra toda a lógica em um único método, <code>generateReport</code>, com cerca de 55 linhas. Encontrei três smells principais.</p>
+<h3>1.1 Método Longo (Long Method)</h3>
+<p><code>generateReport</code> monta o cabeçalho, filtra os itens por papel do usuário, decide quais itens são prioritários, formata cada linha em CSV ou HTML, soma o total e monta o rodapé. São pelo menos seis responsabilidades em um único método.</p>
+<ul>
+<li><strong>Manutenção:</strong> para mudar qualquer detalhe (por exemplo, o layout do HTML) é preciso ler e entender o método inteiro, e qualquer mudança arrisca afetar as outras partes.</li>
+<li><strong>Testes:</strong> não dá para testar uma regra isolada (por exemplo, "usuário comum só vê itens ≤ 500"). Todo teste precisa passar pelo método inteiro e verificar a string final.</li>
+</ul>
+<h3>1.2 Condicionais Complexas e Repetidas (Switch Statements / Complex Conditional)</h3>
+<p>O mesmo teste <code>if (reportType === 'CSV') … else if (reportType === 'HTML')</code> aparece <strong>quatro vezes</strong> (cabeçalho, corpo do ADMIN, corpo do USER e rodapé), e dentro do laço há ifs aninhados em até quatro níveis (<code>for</code> → <code>role</code> → <code>value</code> → <code>reportType</code>).</p>
+<ul>
+<li><strong>Manutenção:</strong> adicionar um novo formato (por exemplo, JSON ou PDF) obriga a mexer em quatro lugares diferentes. Esquecer um deles gera um relatório quebrado sem erro de compilação. O mesmo acontece ao adicionar um novo papel (por exemplo, <code>MANAGER</code>).</li>
+<li><strong>Testes:</strong> cada combinação de papel × formato × faixa de valor é um caminho diferente. O número de casos de teste necessários para cobrir todos os ramos cresce de forma multiplicativa.</li>
+</ul>
+<h3>1.3 Código Duplicado (Duplicated Code)</h3>
+<ul>
+<li>A linha CSV <code>${item.id},${item.name},${item.value},${user.name}</code> é idêntica nos ramos ADMIN e USER.</li>
+<li>A linha HTML <code>&lt;tr&gt;…&lt;td&gt;${item.id}&lt;/td&gt;&lt;td&gt;${item.name}&lt;/td&gt;&lt;td&gt;${item.value}&lt;/td&gt;&lt;/tr&gt;</code> aparece duas vezes, com uma pequena variação.</li>
+<li>
+<p><code>total += item.value</code> é repetido em <strong>quatro</strong> ramos.</p>
+</li>
+<li>
+<p><strong>Manutenção:</strong> uma correção feita em uma cópia precisa ser lembrada em todas as outras. Foi exatamente o que aconteceu aqui: a linha HTML do ADMIN usa <code>`&lt;tr ${style}&gt;`</code>, que gera <code>&lt;tr &gt;</code> (com espaço) quando o item não é prioritário, enquanto a do USER gera <code>&lt;tr&gt;</code>. As duas cópias divergiram.</p>
+</li>
+<li><strong>Testes:</strong> os testes precisam verificar a mesma formatação em vários cenários, porque não há garantia de que as cópias se comportam igual.</li>
+</ul>
+<h3>Smells secundários</h3>
+<ul>
+<li><strong>Números mágicos:</strong> <code>1000</code> (limite de prioridade) e <code>500</code> (limite de visibilidade do USER) aparecem sem nome.</li>
+<li><strong>Efeito colateral no parâmetro:</strong> <code>item.priority = true</code> altera os objetos recebidos pelo método. Por isso os testes precisam fazer <code>JSON.parse(JSON.stringify(testItems))</code> para se proteger.</li>
+<li><strong>Campo não usado:</strong> <code>this.db</code> é armazenado e nunca utilizado.</li>
+</ul>
+<hr />
+<h2>2. Relatório da Ferramenta (ESLint + eslint-plugin-sonarjs)</h2>
+<p>Configuração usada (<code>.eslintrc.json</code>): <code>eslint:recommended</code> + <code>plugin:sonarjs/recommended</code>, com <code>sonarjs/cognitive-complexity</code> limitado a <strong>5</strong>, além de <code>sonarjs/no-identical-functions</code> e <code>sonarjs/no-duplicated-branches</code> como erro. O limite de 5 já vinha no repositório e é mais rigoroso que o valor 15 sugerido no enunciado.</p>
+<p><img alt="Saída de npx eslint src/ antes da refatoração" src="relatorio/img/eslint-antes.png" /></p>
+<p><em>Figura 1 — <code>npx eslint src/</code> antes da refatoração: 2 erros, complexidade cognitiva 27.</em></p>
+<p><strong>Como a ferramenta ajudou:</strong> a análise manual identifica que o método "parece complicado", mas a regra <code>sonarjs/cognitive-complexity</code> <strong>quantifica</strong> isso. Ela soma +1 para cada <code>if</code>/<code>else if</code>/<code>for</code>/ternário e soma um peso adicional para cada nível de aninhamento. Assim, o <code>if (reportType === 'CSV')</code> no 4º nível de aninhamento custa bem mais que o do cabeçalho. Isso mostra que o problema principal não é a quantidade de ifs, e sim o <strong>aninhamento</strong>. Com esse número a refatoração ganha um critério objetivo (passar de 27 para ≤ 5) em vez de uma impressão subjetiva.</p>
+<p>A ferramenta também apontou algo que eu não tinha anotado na análise manual: a regra <code>sonarjs/no-collapsible-if</code> (linha 43) indica que o <code>else if (user.role === 'USER')</code> contém um único <code>if (item.value &lt;= 500)</code> aninhado, que poderia ser fundido em uma condição só. É um aninhamento desnecessário, fácil de passar despercebido na leitura. Além disso, a ferramenta é repetível e roda em CI, enquanto a revisão manual depende de quem lê.</p>
+<hr />
+<h2>3. Processo de Refatoração</h2>
+<p>O smell mais crítico era a <strong>condicional complexa e repetida</strong> dentro de um método longo, porque é ele que gera a alta complexidade cognitiva e a duplicação.</p>
+<div class="cmp"><div><h3>Antes (trecho do corpo)</h3>
+<pre><code class="language-js">for (const item of items) {
+  if (user.role === 'ADMIN') {
+    if (item.value &gt; 1000) {
+      item.priority = true;
+    }
+    if (reportType === 'CSV') {
+      report += `${item.id},${item.name},${item.value},${user.name}\n`;
+      total += item.value;
+    } else if (reportType === 'HTML') {
+      const style = item.priority ? 'style=&quot;font-weight:bold;&quot;' : '';
+      report += `&lt;tr ${style}&gt;&lt;td&gt;${item.id}&lt;/td&gt;&lt;td&gt;${item.name}&lt;/td&gt;&lt;td&gt;${item.value}&lt;/td&gt;&lt;/tr&gt;\n`;
+      total += item.value;
+    }
+  } else if (user.role === 'USER') {
+    if (item.value &lt;= 500) {
+      if (reportType === 'CSV') {
+        report += `${item.id},${item.name},${item.value},${user.name}\n`;
+        total += item.value;
+      } else if (reportType === 'HTML') {
+        report += `&lt;tr&gt;&lt;td&gt;${item.id}&lt;/td&gt;&lt;td&gt;${item.name}&lt;/td&gt;&lt;td&gt;${item.value}&lt;/td&gt;&lt;/tr&gt;\n`;
+        total += item.value;
+      }
+    }
+  }
+}
+</code></pre></div><div><h3>Depois</h3>
+<pre><code class="language-js">const ROLE_RULES = {
+  ADMIN: {
+    canSee: () =&gt; true,
+    isPriority: (item) =&gt; item.value &gt; ADMIN_PRIORITY_THRESHOLD,
+  },
+  USER: {
+    canSee: (item) =&gt; item.value &lt;= USER_MAX_VISIBLE_VALUE,
+    isPriority: () =&gt; false,
+  },
+};
+
+const FORMATTERS = { CSV: new CsvFormatter(), HTML: new HtmlFormatter() };
+
+generateReport(reportType, user, items) {
+  const formatter = FORMATTERS[reportType];
+  if (!formatter) {
+    return '';
+  }
+
+  const rules = this.rulesFor(user);
+  const visibleItems = items.filter((item) =&gt; rules.canSee(item));
+
+  const body = visibleItems
+    .map((item) =&gt; formatter.row(item, user, rules.isPriority(item)))
+    .join('');
+
+  const report =
+    formatter.header(user) + body + formatter.footer(sumValues(visibleItems));
+
+  return report.trim();
+}
+</code></pre></div></div>
+<h3>Técnicas aplicadas</h3>
+<ol>
+<li><strong>Replace Conditional with Polymorphism:</strong> as quatro cadeias <code>if (reportType === …)</code> viraram duas classes, <code>CsvFormatter</code> e <code>HtmlFormatter</code>, com a mesma interface (<code>header</code>, <code>row</code>, <code>footer</code>). O método escolhe o formatador uma única vez com <code>FORMATTERS[reportType]</code>. Para adicionar um formato novo basta criar uma classe, sem mexer em <code>generateReport</code> (princípio Aberto/Fechado).</li>
+<li><strong>Replace Conditional with Polymorphism / Decompose Conditional (papéis):</strong> a cadeia <code>if (user.role === …)</code> virou o mapa <code>ROLE_RULES</code>, em que cada papel declara <code>canSee</code> e <code>isPriority</code>. Um papel desconhecido usa <code>NO_ACCESS_RULES</code>, o mesmo comportamento do original (nenhum item listado).</li>
+<li><strong>Extract Method / Extract Function:</strong> <code>sumValues</code> e <code>rulesFor</code> isolam o cálculo do total e a escolha da regra. O total é calculado uma vez sobre <code>visibleItems</code>, o que elimina as quatro cópias de <code>total += item.value</code>.</li>
+<li><strong>Replace Magic Number with Symbolic Constant:</strong> <code>ADMIN_PRIORITY_THRESHOLD = 1000</code> e <code>USER_MAX_VISIBLE_VALUE = 500</code>.</li>
+<li><strong>Remoção de efeito colateral (Separate Query from Modifier):</strong> a prioridade é calculada por <code>isPriority(item)</code> em vez de gravar <code>item.priority = true</code> no objeto do chamador.</li>
+</ol>
+<p>Com isso, <code>generateReport</code> passa de um único bloco com 4 níveis de aninhamento para um fluxo linear com um único <code>if</code> (guard clause), e cada função fica abaixo do limite de complexidade cognitiva 5.</p>
+<p><img alt="Saída de npx eslint no arquivo refatorado" src="relatorio/img/eslint-depois.png" /></p>
+<p><em>Figura 2 — <code>npx eslint src/ReportGenerator.refactored.js</code>: nenhum problema reportado.</em></p>
+<p><img alt="Saída de npm test" src="relatorio/img/npm-test.png" /></p>
+<p><em>Figura 3 — <code>npm test</code>: a suíte do arquivo refatorado passa (PASS); a do original falha em 1 teste, pelo bug do <code>&lt;tr &gt;</code> explicado abaixo. Os avisos <code>ExperimentalWarning</code> vêm do flag <code>--experimental-vm-modules</code> e não são erros.</em></p>
+<p><strong>Resultado:</strong> <code>npx eslint src/ReportGenerator.refactored.js</code> termina com <strong>0 problemas</strong> (antes eram 2 erros, com complexidade cognitiva 27). <code>npm test</code> executa as duas suítes: <code>ReportGenerator.refactored.test.js</code> passa <strong>5/5</strong>.</p>
+<p><strong>Ajuste de ambiente:</strong> o projeto declara <code>"type": "module"</code>, e por isso o Jest 29 não carregava os arquivos (<code>SyntaxError: Cannot use import statement outside a module</code>). O script <code>test</code> do <code>package.json</code> foi alterado para <code>node --experimental-vm-modules node_modules/jest/bin/jest.js</code>, que habilita o suporte a ES Modules. Os testes em si não foram alterados.</p>
+<p><strong>Observação sobre a rede de segurança:</strong> o teste "deve gerar um relatório HTML completo para Admin" espera <code>&lt;tr&gt;&lt;td&gt;1&lt;/td&gt;…</code>, mas o código original gera <code>&lt;tr &gt;&lt;td&gt;1&lt;/td&gt;…</code> (com espaço) para itens não prioritários do ADMIN, justamente por causa da duplicação descrita em 1.3. Por isso, ao rodar a suíte, o arquivo original passa <strong>4/5</strong> testes, e o resultado total é 9 de 10. Optei por <strong>não corrigir o arquivo original</strong>, conforme a instrução do trabalho de não modificá-lo. A falha mostra na prática o custo do smell de duplicação: duas cópias da mesma formatação divergiram e uma delas ficou com um bug. Na versão refatorada existe uma única função <code>row</code>, que só insere o atributo <code>style</code> quando necessário, então a saída é uniforme e o teste passa.</p>
+<hr />
+<h2>4. Conclusão</h2>
+<p>A suíte de testes foi o que tornou a refatoração <strong>segura</strong>. Ela verifica o comportamento observável (a string gerada) e não a implementação, por isso foi possível reestruturar o código por completo (trocar ifs por objetos e laços por <code>filter</code>/<code>map</code>/<code>reduce</code>) e confirmar a cada passo que nada quebrou. Sem ela, cada mudança dependeria de inspeção manual e o risco de regressão desestimularia a refatoração. Na prática, é isso que faz o código "apodrecer".</p>
+<p>A redução dos bad smells melhora a qualidade de forma concreta:</p>
+<ul>
+<li><strong>Legibilidade:</strong> <code>generateReport</code> agora se lê como a descrição do problema (escolher formato, filtrar, formatar, somar).</li>
+<li><strong>Extensibilidade:</strong> novos formatos ou papéis são adicionados sem tocar no código existente.</li>
+<li><strong>Testabilidade:</strong> regras como <code>ROLE_RULES.USER.canSee</code> e <code>HtmlFormatter.row</code> podem ser testadas isoladamente.</li>
+<li><strong>Confiabilidade:</strong> sem duplicação, inconsistências como a do <code>&lt;tr &gt;</code> deixam de acontecer, porque cada formato existe em um único lugar.</li>
+</ul>
+<p>Por fim, o ESLint com o SonarJS transforma "código ruim" em uma métrica objetiva e automatizável, que pode ser aplicada no CI para impedir que os smells voltem.</p>
+</body></html>
